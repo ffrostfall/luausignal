@@ -36,24 +36,7 @@ end
 
 local signal = {}
 signal.__index = signal
-type InternalIdentity<T...> = typeof(setmetatable(
-	{} :: {
-		[number]: (T...) -> (),
-	},
-	{
-		-- Workaround for generics: This basically creates a unique metatable type for each signal
-		-- This is because if we use the same metatable for all signals, the generics will be shared because
-		-- well that's how metatables work.
-		__index = signal :: {
-			fire: (self: InternalIdentity<T...>, T...) -> (),
-			connect: (self: InternalIdentity<T...>, callback: (T...) -> ()) -> () -> (),
-			once: (self: InternalIdentity<T...>, callback: (T...) -> ()) -> () -> (),
-			wait: (self: InternalIdentity<T...>) -> T...,
-			disconnectAll: (self: InternalIdentity<T...>) -> T...,
-			delete: (self: InternalIdentity<T...>) -> (),
-		},
-	}
-))
+type InternalIdentity<T...> = setmetatable<{ (T...) -> () }, typeof(signal)>
 
 --[=[
 	@class signal
@@ -66,13 +49,7 @@ type InternalIdentity<T...> = typeof(setmetatable(
 	```
 ]=]
 local function constructor<T...>(): InternalIdentity<T...>
-	return setmetatable(
-		{} :: {
-			[number]: (T...) -> (),
-		},
-		-- See above comment
-		signal :: any
-	)
+	return setmetatable({}, signal)
 end
 
 --[=[
