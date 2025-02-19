@@ -1,6 +1,6 @@
 --!optimize 2
 --!native
-local task = (task or require("@lune/task")) :: typeof(task)
+local task = task or require("@lune/task")
 
 local tspawn = task.spawn
 local cyield = coroutine.yield
@@ -20,7 +20,7 @@ local errorTable = {
 }
 
 local function run<T...>(func: (T...) -> (), ...: T...)
-	local ref: thread? = freeThread
+	local ref = freeThread
 	freeThread = nil
 
 	func(...)
@@ -135,7 +135,8 @@ end
 function signal.once<T...>(self: InternalIdentity<T...>, callback: (T...) -> ())
 	local disconnect
 	disconnect = self:connect(function(...)
-		(disconnect :: any)()
+		assert(disconnect ~= nil, "Luau")
+		disconnect()
 
 		callback(...)
 	end)
