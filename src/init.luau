@@ -108,10 +108,10 @@ end
 ]=]
 function signal.connect<T...>(self: InternalIdentity<T...>, callback: (T...) -> ())
 	table.insert(self, callback)
-	local callbackRef = callback
 
 	return function()
-		local index = table.find(self, callbackRef)
+		local index = table.find(self, callback)
+
 		if index then
 			table.remove(self, index)
 		end
@@ -134,14 +134,14 @@ end
 	@return void
 ]=]
 function signal.fire<T...>(self: InternalIdentity<T...>, ...: T...)
-	for _, callback in self do
+	for i = #(self :: any), 1, -1 do
 		if not freeThread then
 			freeThread = coroutine.create(yieldLoop)
 			tspawn(freeThread :: thread)
 		end
 
 		-- Type states don't take into account assigning yet
-		tspawn(freeThread :: thread, callback, ...)
+		tspawn(freeThread :: thread, self[i], ...)
 	end
 end
 

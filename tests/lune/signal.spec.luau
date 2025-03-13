@@ -150,7 +150,25 @@ case("ordering is preserved", function(interface)
 
 	sig:fire()
 
-	interface.expect.equal(order, { 1, 2 })
+	interface.expect.equal(order, { 2, 1 })
+end)
+
+case("once fires multiple times", function(interface)
+	local sig = signal()
+
+	local order = {}
+
+	sig:once(function()
+		table.insert(order, 1)
+	end)
+
+	sig:once(function()
+		table.insert(order, 2)
+	end)
+
+	sig:fire()
+
+	interface.expect.equal(order, { 2, 1 })
 end)
 
 case("ordering is preserved with disconnect", function(interface)
@@ -171,6 +189,26 @@ case("ordering is preserved with disconnect", function(interface)
 	sig:fire()
 
 	interface.expect.equal(order, { 2 })
+end)
+
+case("multiple threads get resumed", function(interface)
+	local sig = signal()
+
+	local thread1 = task.spawn(function()
+		sig:wait()
+	end)
+
+	local thread2 = task.spawn(function()
+		sig:wait()
+	end)
+
+	interface.expect.equal(coroutine.status(thread1), "suspended")
+	interface.expect.equal(coroutine.status(thread2), "suspended")
+
+	sig:fire()
+
+	interface.expect.equal(coroutine.status(thread1), "dead")
+	interface.expect.equal(coroutine.status(thread2), "dead")
 end)
 
 return eof()
