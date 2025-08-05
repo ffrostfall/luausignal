@@ -6,6 +6,10 @@
 		"ReplicatedStorage": {
 			"benches": {
 				"$path": "benches"
+			},
+
+			"signal": {
+				"$path": "src"
 			}
 		}
 	}

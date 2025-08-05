@@ -237,4 +237,78 @@ TEST("edge cases", function()
 	end
 end)
 
+TEST("yielding/error cases", function()
+	CASE("error case")
+	do
+		local sig = signal()
+
+		local count = 0
+
+		sig:connect(function()
+			count += 1
+		end)
+
+		sig:connect(function()
+			count += 1
+			error("error")
+			return
+		end)
+		sig:connect(function()
+			count += 1
+		end)
+
+		sig:fire()
+
+		CHECK(count == 3)
+	end
+
+	CASE("yield case")
+	do
+		local sig = signal()
+
+		local count = 0
+
+		sig:connect(function()
+			count += 1
+		end)
+
+		sig:connect(function()
+			count += 1
+			coroutine.yield()
+		end)
+
+		sig:connect(function()
+			count += 1
+		end)
+
+		sig:fire()
+
+		CHECK(count == 3)
+	end
+
+	CASE("yield resumption case")
+	do
+		local sig = signal()
+
+		local count = 0
+
+		sig:connect(function()
+			count += 1
+		end)
+
+		sig:once(function()
+			count += 1
+			task.wait(0.1)
+		end)
+
+		sig:connect(function()
+			count += 1
+		end)
+
+		sig:fire()
+
+		CHECK(count == 3)
+	end
+end)
+
 return FINISH()

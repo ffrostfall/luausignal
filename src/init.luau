@@ -20,11 +20,15 @@ local error_tbl = {
 
 local function yield_loop()
 	while true do
-		local func, arg = coroutine.yield()
+		local sig: InternalIdentity<any>, arg: any = coroutine.yield()
+
 		local ref = free_thread
 		free_thread = nil
 
-		func(arg)
+		while sig._head ~= 0 do
+			sig._head -= 1
+			sig[sig._head + 1](arg)
+		end
 
 		free_thread = ref
 	end
@@ -32,7 +36,7 @@ end
 
 local signal = {}
 signal.__index = signal
-type InternalIdentity<T> = setmetatable<{ (T) -> () }, typeof(signal)>
+type InternalIdentity<T> = setmetatable<{ _head: number, [number]: (T) -> () }, typeof(signal)>
 
 --[=[
 	@class signal
@@ -45,7 +49,9 @@ type InternalIdentity<T> = setmetatable<{ (T) -> () }, typeof(signal)>
 	```
 ]=]
 local function constructor<T>(): InternalIdentity<T>
-	return setmetatable({}, signal)
+	return setmetatable({
+		_head = 0,
+	}, signal)
 end
 
 --[=[
@@ -109,8 +115,14 @@ end
 	@return void
 ]=]
 function signal.fire<T>(self: InternalIdentity<T>, arg: T)
-	for i = #(self :: any), 1, -1 do
-		free_thread = tspawn(free_thread or tspawn(yield_loop), self[i], arg)
+	self._head = #self
+	while self._head ~= 0 do
+		if not free_thread then
+			free_thread = tspawn(yield_loop)
+		end
+
+		-- Type states don't take into account assigning yet
+		task.spawn(free_thread, self, arg)
 	end
 end
 

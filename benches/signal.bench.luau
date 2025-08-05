@@ -1,8 +1,9 @@
 --!optimize 2
+--!native
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local goodsignal = require(ReplicatedStorage.benches.libs.goodsignal)
-local luausignal = require(ReplicatedStorage.benches.libs["luausignal-mirror"])
+local luausignal = require(ReplicatedStorage.signal)
 
 return {
 	Functions = {
