@@ -1,5 +1,10 @@
 # Changelog
 
+### 0.6.0
+
+- Performance improvements
+- Switched to only one argument, it's better for types + better performance.
+
 ### 0.5.0
 
 - Fixed a niche bug where disconnecting multiple connections in the same fire would break

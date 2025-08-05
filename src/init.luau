@@ -3,40 +3,36 @@
 local task = task or require("@lune/task")
 
 local tspawn = task.spawn
-local cyield = coroutine.yield
 
-local freeThread: thread? = nil
+local free_thread: thread? = nil
 
-local function deletedSignalError()
+local function deleted_signal_err()
 	error("Cannot fire a deleted signal", 2)
 end
 
-local errorTable = {
-	fire = deletedSignalError,
-	connect = deletedSignalError,
-	once = deletedSignalError,
-	wait = deletedSignalError,
-	disconnectAll = deletedSignalError,
+local error_tbl = {
+	fire = deleted_signal_err,
+	connect = deleted_signal_err,
+	once = deleted_signal_err,
+	wait = deleted_signal_err,
+	disconnectAll = deleted_signal_err,
 }
 
-local function run<T...>(func: (T...) -> (), ...: T...)
-	local ref = freeThread
-	freeThread = nil
-
-	func(...)
-
-	freeThread = ref
-end
-
-local function yieldLoop()
+local function yield_loop()
 	while true do
-		run(cyield())
+		local func, arg = coroutine.yield()
+		local ref = free_thread
+		free_thread = nil
+
+		func(arg)
+
+		free_thread = ref
 	end
 end
 
 local signal = {}
 signal.__index = signal
-type InternalIdentity<T...> = setmetatable<{ (T...) -> () }, typeof(signal)>
+type InternalIdentity<T> = setmetatable<{ (T) -> () }, typeof(signal)>
 
 --[=[
 	@class signal
@@ -48,7 +44,7 @@ type InternalIdentity<T...> = setmetatable<{ (T...) -> () }, typeof(signal)>
 	signal()
 	```
 ]=]
-local function constructor<T...>(): InternalIdentity<T...>
+local function constructor<T>(): InternalIdentity<T>
 	return setmetatable({}, signal)
 end
 
@@ -80,19 +76,21 @@ end
 	
 	It's also worth noting that disconnecting is not an optimal operation, as it will shift the array. If you have a lot of connections to a single signal, you should avoid frequent disconnections.
 	
-	@param callback (T...) -> ()
+	@param callback (T) -> ()
 	@return () -> ()
 ]=]
-function signal.connect<T...>(self: InternalIdentity<T...>, callback: (T...) -> ())
+function signal.connect<T>(self: InternalIdentity<T>, callback: (T) -> ())
 	table.insert(self, callback)
 
-	return function()
+	local function disconnecter()
 		local index = table.find(self, callback)
 
 		if index then
 			table.remove(self, index)
 		end
 	end
+
+	return disconnecter
 end
 
 --[=[
@@ -110,15 +108,9 @@ end
 	@param data ...
 	@return void
 ]=]
-function signal.fire<T...>(self: InternalIdentity<T...>, ...: T...)
+function signal.fire<T>(self: InternalIdentity<T>, arg: T)
 	for i = #(self :: any), 1, -1 do
-		if not freeThread then
-			freeThread = coroutine.create(yieldLoop)
-			tspawn(freeThread :: thread)
-		end
-
-		-- Type states don't take into account assigning yet
-		tspawn(freeThread :: thread, self[i], ...)
+		free_thread = tspawn(free_thread or tspawn(yield_loop), self[i], arg)
 	end
 end
 
@@ -129,16 +121,16 @@ end
 	Connects to a signal, and disconnects after the first time it is fired.
 	You can still disconnect the connection before it is fired.
 	
-	@param callback (T...) -> ()
+	@param callback (T) -> ()
 	@return () -> ()
 ]=]
-function signal.once<T...>(self: InternalIdentity<T...>, callback: (T...) -> ())
+function signal.once<T>(self: InternalIdentity<T>, callback: (T) -> ())
 	local disconnect
-	disconnect = self:connect(function(...)
+	disconnect = self:connect(function(arg)
 		assert(disconnect ~= nil, "Luau")
 		disconnect()
 
-		callback(...)
+		callback(arg)
 	end)
 end
 
@@ -149,21 +141,21 @@ end
 	Yields the current thread until the signal is fired, and returns the arguments passed.
 	Will raise an error if the thread is resumed before the signal is fired.
 	
-	@return T...
+	@return T
 ]=]
-function signal.wait<T...>(self: InternalIdentity<T...>): T...
+function signal.wait<T>(self: InternalIdentity<T>): T
 	local running = coroutine.running()
 
-	self:once(function(...)
+	self:once(function(arg)
 		assert(
 			coroutine.status(running) == "suspended",
 			":wait() called, then another thread resumed the waiting thread. Please dont do that :("
 		)
 
-		tspawn(running, ...)
+		tspawn(running, arg)
 	end)
 
-	return cyield()
+	return coroutine.yield()
 end
 
 --[=[
@@ -172,7 +164,7 @@ end
 	
 	Disconnects all connections to the signal. This is an efficient operation, utilizing `table.clear`.
 ]=]
-function signal.disconnectAll<T...>(self: InternalIdentity<T...>)
+function signal.disconnectAll<T>(self: InternalIdentity<T>)
 	table.clear(self)
 end
 
@@ -185,19 +177,19 @@ end
 	
 	This will prevent and raise an error upon any attempts to use the signal, which is useful for debugging & catching leaks.
 ]=]
-function signal.delete<T...>(self: InternalIdentity<T...>): ()
+function signal.delete<T>(self: InternalIdentity<T>): ()
 	self:disconnectAll()
 
-	setmetatable(self, errorTable)
+	setmetatable(self, error_tbl)
 end
 
-export type Identity<T...> = {
-	fire: (self: Identity<T...>, T...) -> (),
-	connect: (self: Identity<T...>, callback: (T...) -> ()) -> () -> (),
-	once: (self: Identity<T...>, callback: (T...) -> ()) -> () -> (),
-	wait: (self: Identity<T...>) -> T...,
-	disconnectAll: (self: Identity<T...>) -> (),
-	delete: (self: Identity<T...>) -> (),
+export type Identity<T = any> = {
+	fire: (self: Identity<T>, arg: T) -> (),
+	connect: (self: Identity<T>, callback: (arg: T) -> ()) -> () -> (),
+	once: (self: Identity<T>, callback: (arg: T) -> ()) -> () -> (),
+	wait: (self: Identity<T>) -> T,
+	disconnectAll: (self: Identity<T>) -> (),
+	delete: (self: Identity<T>) -> (),
 }
 
-return constructor :: <T...>() -> Identity<T...>
+return constructor :: () -> Identity
