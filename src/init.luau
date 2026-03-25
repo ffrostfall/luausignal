@@ -204,4 +204,4 @@ export type Identity<T = any> = {
 	delete: (self: Identity<T>) -> (),
 }
 
-return constructor :: () -> Identity
+return constructor :: <T>() -> Identity<T>
