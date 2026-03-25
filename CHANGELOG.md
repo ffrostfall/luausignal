@@ -1,5 +1,9 @@
 # Changelog
 
+### 0.6.1
+
+- Added ability to use type instantiation on the constructor
+
 ### 0.6.0
 
 - Performance improvements
@@ -8,7 +12,7 @@
 ### 0.5.0
 
 - Fixed a niche bug where disconnecting multiple connections in the same fire would break
-  - The solution is to iterate over connections in reverse. This breaks backwards compatibility, so a bump is needed.
+    - The solution is to iterate over connections in reverse. This breaks backwards compatibility, so a bump is needed.
 
 ### 0.4.0
 
