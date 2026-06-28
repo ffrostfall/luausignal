@@ -4,35 +4,18 @@ local task = task or require("@lute/task")
 
 const tspawn = task.spawn
 const NIL_TABLE = {}
+const COLLECTOR_MINIMUM_CLEAN_SIZE = 16
 
 local free_thread: thread? = nil
 
-local function bitmask(idx: number)
-	return 2 ^ idx
-end
-
-local function set_bit(int: number, mask: number): number
-	return bit32.bor(int, mask)
-end
-
-local function get_bit(int: number, mask: number): boolean
-	return bit32.band(int, mask) ~= 0
-end
-
-local function all_bits_set(bit_stack: number, mask: number): boolean
-	return bit32.band(bit_stack, mask) == mask
-end
-
 local function deleted_signal_err()
-	error("Cannot fire a deleted signal", 2)
+	error("Cannot operate on a deleted signal", 2)
 end
 
-const error_tbl = {
-	fire = deleted_signal_err,
-	connect = deleted_signal_err,
-	once = deleted_signal_err,
-	wait = deleted_signal_err,
-	disconnect_all = deleted_signal_err,
+const error_metatable = {
+	__index = function()
+		return deleted_signal_err
+	end
 }
 
 const function yield_loop()
@@ -56,59 +39,70 @@ const signal = {}
 signal.__index = signal
 type InternalIdentity<T...> = setmetatable<{
 	_head: number,
-	_collect_queue: { { [number]: unknown, seen_by: number } },
-	_collector_count: number,
-	_collector_mask: number,
 	[number]: (T...) -> (),
+
+	-- TODO: try this as a dynamic size ring buffer so that everything can be constant time
+	read _collect_queue: { { unknown } },
+	_collect_top: number,
+	_collect_top_peaked: number,
+	_dirty: boolean,
+
+	read _collector_visited: { number },
+	_collector_count: number,
 }, typeof(signal)>
 
 --[=[
 	@class signal
-	
+
 	The main class for this package. It is actually just an array with a metatable! Constructed with:
 	```lua
 	local signal = require(...)
-	
+
 	signal()
 	```
 ]=]
 const function constructor<T...>(): InternalIdentity<T...>
 	return setmetatable({
 		_head = 0,
-		_collect_queue = {} :: any,
+
+		_collect_queue = {} :: { {unknown} },
+		_collect_top = 0,
+		_collect_top_peaked = 0,
+		_dirty = false,
+
+		_collector_visited = {} :: { number },
 		_collector_count = 0,
-		_collector_mask = 0,
 	}, signal)
 end
 
 --[=[
 	@method connect
 	@within signal
-	
+
 	Connects a function to the signal. This will be called whenever the signal is fired.
 	Connections can be "disconnected" (they won't be called when the signal is fired) by calling the function that they return.
 	```lua
 	local sig = signal()
-	
+
 	-- You can connect a function like this
 	sig:connect(function(text)
 		print(text)
 	end)
-	
+
 	-- You can also directly connect the function like this.
 	sig:connect(print)
-	
+
 	-- Will print twice, because two connections.
 	sig:fire("Hello, world!")
 	```
-	
+
 	You shouldn't connect the same function twice. This is because the function is used as a reference to disconnect when disconnecting later.
 	While it *might* work for simple or specialized cases, you may find that it doesn't work as expected in some cases.
-	
+
 	Connections will be ran in order of connection.
-	
+
 	It's also worth noting that disconnecting is not an optimal operation, as it will shift the array. If you have a lot of connections to a single signal, you should avoid frequent disconnections.
-	
+
 	@param callback (T) -> ()
 	@return () -> ()
 ]=]
@@ -132,20 +126,16 @@ end
 
 	Firing a signal will run all connections in order, while using thread reusage.
 	[You can find more on this optimization here](https://devforum.roblox.com/t/thread-reuse-how-it-works-why-it-works/1999166).
-	
+
 	You should note these things about thread reusage:
 	- You cannot rely on the thread being different, or the same consistently.
 	- The above means that certain "no-yield" implementations might not work correctly in connections.
 	- If you have a lot of connections, you should avoid yielding in said connections. Yielding forces a new thread to be spawned, which isn't optimal, but it's still okay.
-	
+
 	@param data ...
 	@return void
 ]=]
 function signal.fire<T...>(self: InternalIdentity<T...>, ...)
-	if self._collector_count >= 1 then
-		table.insert(self._collect_queue, { ..., seen_by = 0 })
-	end
-
 	self._head = #self
 	while self._head ~= 0 do
 		if not free_thread then
@@ -154,15 +144,47 @@ function signal.fire<T...>(self: InternalIdentity<T...>, ...)
 
 		(tspawn :: any)(free_thread, self, ...)
 	end
+
+	const collector_count = self._collector_count
+	if collector_count == 0 then
+		return
+	end
+	const collect_queue = self._collect_queue
+
+	local top = self._collect_top + 1
+	collect_queue[top] = { ... }
+	self._collect_top = top
+
+	-- for a downshift to be considered, the size should be greater than the highest recorded post-cleanup size,
+	if not self._dirty or top <= self._collect_top_peaked then
+		return
+	end
+	self._dirty = false
+
+	const collector_visited = self._collector_visited
+	const downshift = math.min(table.unpack(collector_visited))
+
+	if downshift > COLLECTOR_MINIMUM_CLEAN_SIZE then
+		for key, value in collector_visited do
+			collector_visited[key] = value - downshift
+		end
+		table.move(collect_queue, downshift + 1, top + downshift, 1, collect_queue)
+		top -= downshift
+		self._collect_top = top
+	end
+
+	if top > self._collect_top_peaked then
+		self._collect_top_peaked = top
+	end
 end
 
 --[=[
 	@method once
 	@within signal
-	
+
 	Connects to a signal, and disconnects after the first time it is fired.
 	You can still disconnect the connection before it is fired.
-	
+
 	@param callback (T) -> ()
 	@return () -> ()
 ]=]
@@ -179,10 +201,10 @@ end
 --[=[
 	@method wait
 	@within signal
-	
+
 	Yields the current thread until the signal is fired, and returns the arguments passed.
 	Will raise an error if the thread is resumed before the signal is fired.
-	
+
 	@return T
 ]=]
 function signal.wait<T...>(self: InternalIdentity<T...>): T...
@@ -200,42 +222,35 @@ function signal.wait<T...>(self: InternalIdentity<T...>): T...
 	return coroutine.yield()
 end
 
-function signal.collect<T...>(self: InternalIdentity<T...>): () -> T...
-	self._collector_count += 1
-	const mask = bitmask(self._collector_count - 1)
-	self._collector_mask = bit32.lshift(1, self._collector_count - 1)
+function signal.collect<T...>(self: InternalIdentity<T...>)
+	const collector_id = self._collector_count + 1
+	self._collector_count = collector_id
 
-	const function iter(): ...unknown
-		const collect_queue = self._collect_queue
+	const collector_visited = self._collector_visited
+	collector_visited[collector_id] = self._collect_top
 
-		for i = #collect_queue, 1, -1 do
-			const item = collect_queue[i]
-			if get_bit(item.seen_by, mask) then
-				continue
-			end
+	const collect_queue = self._collect_queue
 
-			local next_seen_by = set_bit(item.seen_by, mask)
-
-			if all_bits_set(next_seen_by, self._collector_mask) then
-				table.remove(collect_queue, i)
-				return table.unpack(item)
-			end
-
-			item.seen_by = next_seen_by
-			return table.unpack(item)
+	const function signal_collector_iter(): ...unknown
+		const next_visit = collector_visited[collector_id] + 1
+		const args = collect_queue[next_visit]
+		if not args then
+			return
 		end
-
-		return
+		collector_visited[collector_id] = next_visit
+		self._dirty = true
+		return table.unpack(args)
 	end
 
-	return iter :: any
+	return signal_collector_iter
 end
 
 --[=[
 	@method disconnectAll
 	@within signal
-	
-	Disconnects all connections to the signal. This is an efficient operation, utilizing `table.clear`.
+
+	Disconnects all connections to the signal. This is very efficient.
+	This will not empty any collector queues or disable collectors.
 ]=]
 function signal.disconnect_all<T...>(self: InternalIdentity<T...>)
 	table.move(NIL_TABLE, 1, #self, 1, self)
@@ -244,16 +259,19 @@ end
 --[=[
 	@method delete
 	@within signal
-	
-	Disconnects all connections to the signal, and renders the signal unusable.
+
+	Disconnects all connections to the signal, clears all collector queues, and renders the signal object unusable.
 	While this technically isn't required or needed for memory concerns, you might want to use this when you're working with others.
-	
+
 	This will prevent and raise an error upon any attempts to use the signal, which is useful for debugging & catching leaks.
 ]=]
 function signal.delete<T...>(self: InternalIdentity<T...>): ()
 	self:disconnect_all()
 
-	setmetatable(self, error_tbl)
+	table.clear(self._collect_queue)
+	self._collect_top = 0
+
+	setmetatable(self, error_metatable)
 end
 
 export type Identity<T...> = {
