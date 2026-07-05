@@ -1,6 +1,6 @@
 [package]
 name = "ffrostfall/luausignal"
-version = "0.8.0-rc.1"
+version = "0.8.0-rc.2"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 

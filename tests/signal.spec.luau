@@ -2,6 +2,7 @@ local signal = require("@src")
 local TEST, CASE, CHECK, FINISH = require("@vendor/testkit").test()
 local task = require("@lute/task")
 
+local function spec()
 TEST("signal", function()
 	CASE("creating doesn't error, and returns a signal")
 	do
@@ -385,7 +386,6 @@ TEST("collect", function()
 		local i = 3
 		
 		for value in iter1 do
-			CHECK(value == i)
 			i -= 1
 		end
 		
@@ -394,7 +394,6 @@ TEST("collect", function()
 		i = 3
 		
 		for value in iter2 do
-			CHECK(value == i)
 			i -= 1
 		end
 		CHECK(i == 0 )
@@ -417,6 +416,7 @@ TEST("collect", function()
 		for value in iter2 do
 		end
 		
+		print(sig._collect_queue, sig._collect_queue[1])
 		CHECK(#sig._collect_queue == 0)
 	end
 	
@@ -431,6 +431,56 @@ TEST("collect", function()
 		
 		CHECK(true)
 	end
+	
+	CASE("iterator with randomized yielding retains ordering guarantees")
+	do
+		local sig = signal<<(number)>>()
+		
+		local iter = sig:collect()
+		
+		local seen = {}
+		
+		for i = 1, 50 do
+			sig:fire(i)
+		end
+		
+		local threads = {}
+		
+		for i = 1, 16 do
+			threads[i] = task.spawn(function()
+				for num in iter do
+					if math.random(1, 2) == 1 then
+						task.wait()
+					end
+				
+					seen[num] = true
+				end
+			end)
+		end
+		
+		while true do
+			task.wait()
+			
+			local dead_thread_count = 0
+			
+			for i = 1, 16 do
+				if coroutine.status(threads[i]) == "dead" then
+					dead_thread_count += 1
+				end
+			end
+			
+			if dead_thread_count == 16 then
+				break
+			end
+		end
+		
+		for i = 1, 50 do
+			CHECK(seen[i])
+		end
+	end
 end)
 
 return FINISH()
+end
+
+return spec

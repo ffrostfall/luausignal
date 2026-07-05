@@ -2,8 +2,8 @@
 --!native
 local task = task or require("@lute/task")
 
-const tspawn = task.spawn
-const NIL_TABLE = {}
+local tspawn = task.spawn
+local NIL_TABLE = {}
 
 local free_thread: thread? = nil
 
@@ -24,10 +24,10 @@ local function all_bits_set(bit_stack: number, mask: number): boolean
 end
 
 local function deleted_signal_err()
-	error("Cannot fire a deleted signal", 2)
+	error("Cannot use a deleted signal", 2)
 end
 
-const error_tbl = {
+local error_tbl = {
 	fire = deleted_signal_err,
 	connect = deleted_signal_err,
 	once = deleted_signal_err,
@@ -35,12 +35,12 @@ const error_tbl = {
 	disconnect_all = deleted_signal_err,
 }
 
-const function yield_loop()
+local function yield_loop()
 	while true do
-		const sig: InternalIdentity<any>, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10 =
+		local sig: InternalIdentity<any>, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10 =
 			coroutine.yield()
 
-		const ref = free_thread
+		local ref = free_thread
 		free_thread = nil
 
 		while sig._head ~= 0 do
@@ -52,7 +52,7 @@ const function yield_loop()
 	end
 end
 
-const signal = {}
+local signal = {}
 signal.__index = signal
 type InternalIdentity<T...> = setmetatable<{
 	_head: number,
@@ -72,7 +72,7 @@ type InternalIdentity<T...> = setmetatable<{
 	signal()
 	```
 ]=]
-const function constructor<T...>(): InternalIdentity<T...>
+local function constructor<T...>(): InternalIdentity<T...>
 	return setmetatable({
 		_head = 0,
 		_collect_queue = {} :: any,
@@ -202,14 +202,14 @@ end
 
 function signal.collect<T...>(self: InternalIdentity<T...>): () -> T...
 	self._collector_count += 1
-	const mask = bitmask(self._collector_count - 1)
+	local mask = bitmask(self._collector_count - 1)
 	self._collector_mask = bit32.lshift(1, self._collector_count - 1)
 
-	const function iter(): ...unknown
-		const collect_queue = self._collect_queue
+	local function iter(): ...unknown
+		local collect_queue = self._collect_queue
 
 		for i = #collect_queue, 1, -1 do
-			const item = collect_queue[i]
+			local item = collect_queue[i]
 			if get_bit(item.seen_by, mask) then
 				continue
 			end
