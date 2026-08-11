@@ -143,7 +143,7 @@ end
 ]=]
 function signal.fire<T...>(self: InternalIdentity<T...>, ...)
 	if self._collector_count >= 1 then
-		table.insert(self._collect_queue, { ..., seen_by = 0 })
+		table.insert(self._collect_queue, { seen_by = 0, ... })
 	end
 
 	self._head = #self
